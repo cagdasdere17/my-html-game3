@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Tank War</title>
+<style>
+body{margin:0;background:#111;color:white;font-family:Verdana;overflow:hidden;}
+button{padding:8px 15px;margin:5px;font-size:14px;cursor:pointer}
+canvas{display:none;}
+
+#menu,#gameOver,#market{
+position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+text-align:center;background:#222;padding:30px;border:2px solid white;
+}
+#gameOver,#market{display:none;}
+#hud{position:absolute;top:10px;left:20px;font-size:22px;font-weight:bold;}
+#healthContainer{position:absolute;top:10px;right:20px;width:200px;height:25px;background:#400;border:2px solid white;}
+#healthBar{height:100%;width:100%;background:red;}
+#joystick{position:absolute;bottom:40px;left:40px;width:120px;height:120px;background:rgba(255,255,255,0.15);border-radius:50%;display:none;}
+#fireBtn{position:absolute;bottom:60px;right:60px;width:80px;height:80px;background:red;border-radius:50%;display:none;}
+</style>
+</head>
+<body>
+
+<div id="menu">
+<h1>🛡️ Tank War 🛡️</h1>
+<button onclick="startGame()">Başla</button>
+<button onclick="openMarket()">Market</button>
+</div>
+
+<div id="market">
+<h2>Skin Market (250 Puan)</h2>
+<p>Toplam Puan: <span id="money"></span></p>
+<button onclick="buySkin('red')">Kırmızı-Beyaz</button>
+<button onclick="buySkin('blue')">Mavi-Beyaz</button>
+<button onclick="buySkin('default')">Varsayılan</button>
+<br><br>
+<button onclick="closeMarket()">Geri</button>
+</div>
+
+<div id="gameOver">
+<h2 id="overText"></h2>
+<button onclick="startGame()">Tekrar</button>
+<button onclick="backMenu()">Menü</button>
+</div>
+
+<div id="hud">🟡 Puan: 0</div>
+<div id="healthContainer"><div id="healthBar"></div></div>
+<div id="joystick"></div>
+<div id="fireBtn"></div>
+<canvas id="canvas"></canvas>
+
+<script>
+/* ELEMENTLER */
+const menu=document.getElementById("menu");
+const market=document.getElementById("market");
+const gameOver=document.getElementById("gameOver");
+const healthContainer=document.getElementById("healthContainer");
+const healthBar=document.getElementById("healthBar");
+const joystick=document.getElementById("joystick");
+const fireBtn=document.getElementById("fireBtn");
+const hud=document.getElementById("hud");
+const money=document.getElementById("money");
+const overText=document.getElementById("overText");
+
+/* CANVAS */
+let canvas=document.getElementById("canvas");
+let ctx=canvas.getContext("2d");
+function resizeCanvas(){canvas.width=window.innerWidth;canvas.height=window.innerHeight;}
+window.addEventListener("resize",resizeCanvas);
+resizeCanvas();
+
+/* OYUN DEĞİŞKENLERİ */
+let isMobile=/Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+let gameActive=false;
+let score=0,totalScore=parseInt(localStorage.getItem("tankScore"))||0;
+let hp=100;
+let player=null,enemies=[],bullets=[],enemyBullets=[],obstacles=[],drops=[];
+let keys={},camX=0,camY=0;
+let mapW=3000,mapH=3000;
+let ownedSkins=["default"],currentSkin="default";
+const POINTS_PER_KILL=5,SKIN_PRICE=250,MAX_SCORE=500;
+let totalEnemiesSpawned=0,MAX_ENEMIES=100;
+
+/* MENU */
+function backMenu(){
+    gameActive=false;canvas.style.display="none";healthContainer.style.display="none";
+    gameOver.style.display="none";menu.style.display="block";
+    enemies.forEach(e=>{if(e.shootInterval) clearInterval(e.shootInterval);});
+}
+function openMarket(){menu.style.display="none";market.style.display="block";money.innerText=totalScore;}
+function closeMarket(){market.style.display="none";menu.style.display="block";}
+function buySkin(type){
+    if(totalScore<SKIN_PRICE && type!=="default"){alert("Yetersiz puan!"); return;}
+    if(!ownedSkins.includes(type)){totalScore-=SKIN_PRICE;localStorage.setItem("tankScore",totalScore);ownedSkins.push(type);}
+    currentSkin=type;money.innerText=totalScore;
+}
+
+/* START */
+function startGame(){
+    menu.style.display="none";gameOver.style.display="none";canvas.style.display="block";healthContainer.style.display="block";
+    if(isMobile){joystick.style.display="block";fireBtn.style.display="block";}
+    gameActive=true;score=0;hp=100;totalEnemiesSpawned=0;
+    player={x:1500,y:1500,size:40,angle:0,speed:5,oldX:1500,oldY:1500};
+    enemies=[];bullets=[];enemyBullets=[];obstacles=[];drops=[];
+    for(let i=0;i<15;i++) spawnObstacle();
+    for(let i=0;i<8;i++) spawnEnemy();
+    enemies.forEach(e=>{
+        if(e.canShoot){
+            e.shootInterval=setInterval(()=>{
+                if(!gameActive) return;
+                let ang=Math.atan2(player.y-e.y,player.x-e.x);
+                enemyBullets.push({x:e.x,y:e.y,dx:Math.cos(ang)*6,dy:Math.sin(ang)*6});
+            },5000);
+        }
+    });
+    setInterval(()=>{if(gameActive) spawnDrop();},60000);
+}
+
+/* SPAWN */
+function spawnEnemy(){
+    if(totalEnemiesSpawned>=MAX_ENEMIES) return;
+    totalEnemiesSpawned++;
+    let enemy;
+    do{
+        enemy={x:Math.random()*(mapW-100)+50,y:Math.random()*(mapH-100)+50,hp:60,speed:2,canShoot:Math.random()<0.3,oldX:0,oldY:0};
+    }while(obstacles.some(o=>enemy.x>o.x-40 && enemy.x<o.x+o.w+40 && enemy.y>o.y-40 && enemy.y<o.y+o.h+40));
+    enemy.oldX=enemy.x;enemy.oldY=enemy.y;
+    enemies.push(enemy);
+    if(totalEnemiesSpawned===MAX_ENEMIES){
+        setTimeout(()=>{alert("🎉 Kazandın! Bonus puan kazandın!");totalScore+=50;localStorage.setItem("tankScore",totalScore);backMenu();},1000);
+    }
+}
+function spawnObstacle(){let x,y; do{x=Math.random()*(mapW-120)+60;y=Math.random()*(mapH-120)+60;}while(Math.hypot(x-player.x,y-player.y)<200);obstacles.push({x:x,y:y,w:100,h:100});}
+function spawnDrop(){drops.push({x:Math.random()*(mapW-100)+50,y:Math.random()*(mapH-100)+50,type:"rocket"});}
+
+/* ATEŞ */
+let fireInterval=null;
+fireBtn.addEventListener("touchstart",function(){
+    if(!gameActive) return;
+    if(fireInterval) clearInterval(fireInterval);
+    fireInterval=setInterval(()=>{bullets.push({x:player.x,y:player.y,dx:Math.cos(player.angle)*10,dy:Math.sin(player.angle)*10});},200);
+});
+fireBtn.addEventListener("touchend",function(){if(fireInterval) clearInterval(fireInterval);});
+canvas.addEventListener("click",function(e){if(!gameActive||isMobile) return; let rect=canvas.getBoundingClientRect(); let mx=e.clientX-rect.left+camX,my=e.clientY-rect.top+camY; let angle=Math.atan2(my-player.y,mx-player.x);player.angle=angle; bullets.push({x:player.x,y:player.y,dx:Math.cos(angle)*10,dy:Math.sin(angle)*10});});
+
+/* JOYSTICK */
+let joyCenterX=100,joyCenterY=window.innerHeight-100;
+joystick.addEventListener("touchmove",function(e){
+    if(!gameActive) return;
+    let touch=e.touches[0];
+    let dx=touch.clientX-joyCenterX,dy=touch.clientY-joyCenterY;
+    let dist=Math.hypot(dx,dy),angle=Math.atan2(dy,dx);
+    let maxDist=50,speed=Math.min(dist/maxDist,1)*player.speed;
+    player.oldX=player.x;player.oldY=player.y;
+    player.x+=Math.cos(angle)*speed;player.y+=Math.sin(angle)*speed;
+    player.angle=angle;
+});
+
+/* KEYBOARD */
+document.addEventListener("keydown",e=>keys[e.key]=true);
+document.addEventListener("keyup",e=>keys[e.key]=false);
+
+/* UPDATE */
+function update(){
+    if(!gameActive||!player) return;
+    player.oldX=player.x;player.oldY=player.y;
+    let nextX=player.x,nextY=player.y;
+    if(!isMobile){if(keys["w"]) nextY-=player.speed;if(keys["s"]) nextY+=player.speed;if(keys["a"]) nextX-=player.speed;if(keys["d"]) nextX+=player.speed;}
+    if(nextX>20 && nextX<mapW-20) player.x=nextX;
+    if(nextY>20 && nextY<mapH-20) player.y=nextY;
+
+    // Obstacle kayma
+    obstacles.forEach(o=>{if(player.x+20>o.x && player.x-20<o.x+o.w && player.y+20>o.y && player.y-20<o.y+o.h){player.x=player.oldX+(player.x-player.oldX)*0.5;player.y=player.oldY+(player.y-player.oldY)*0.5;}});
+
+    camX=player.x-canvas.width/2;camY=player.y-canvas.height/2;
+
+    // Enemy hareket ve hasar
+    enemies.forEach(e=>{
+        e.oldX=e.x;e.oldY=e.y;
+        let ang=Math.atan2(player.y-e.y,player.x-e.x);
+        e.x+=Math.cos(ang)*e.speed;e.y+=Math.sin(ang)*e.speed;
+        obstacles.forEach(o=>{if(e.x+20>o.x && e.x-20<o.x+o.w && e.y+20>o.y && e.y-20<o.y+o.h){e.x=e.oldX;e.y=e.oldY;}});
+        if(Math.hypot(player.x-e.x,player.y-e.y)<40){hp-=0.4;if(hp<=0){hp=0;endGame();}}
+    });
+
+    // Player bullets ve düşman hasarı
+    bullets.forEach((b,i)=>{
+        b.x+=b.dx;b.y+=b.dy;
+        if(b.x<0||b.x>mapW||b.y<0||b.y>mapH) bullets.splice(i,1);
+        enemies.forEach((e,ei)=>{if(Math.hypot(b.x-e.x,b.y-e.y)<30){e.hp-=30;bullets.splice(i,1);if(e.hp<=0){enemies.splice(ei,1);score+=POINTS_PER_KILL;totalScore+=POINTS_PER_KILL;if(totalScore>MAX_SCORE)totalScore=MAX_SCORE;localStorage.setItem("tankScore",totalScore);spawnEnemy();}}});
+    });
+
+    // Enemy bullets
+    enemyBullets.forEach((b,i)=>{b.x+=b.dx;b.y+=b.dy;if(Math.hypot(player.x-b.x,player.y-b.y)<15){hp-=4;enemyBullets.splice(i,1);if(hp<=0){hp=0;endGame();}}if(b.x<0||b.x>mapW||b.y<0||b.y>mapH) enemyBullets.splice(i,1);});
+
+    hud.innerHTML="🟡 Puan: "+totalScore;
+    healthBar.style.width=hp+"%";
+}
+
+/* DRAW */
+function draw(){
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    if(!player) return;
+    ctx.save();ctx.translate(-camX,-camY);
+    ctx.fillStyle="#2e8b57";ctx.fillRect(0,0,mapW,mapH);
+    ctx.fillStyle="#777";obstacles.forEach(o=>ctx.fillRect(o.x,o.y,o.w,o.h));
+    ctx.fillStyle="purple";drops.forEach(d=>{ctx.beginPath();ctx.arc(d.x,d.y,10,0,Math.PI*2);ctx.fill();});
+    ctx.save();ctx.translate(player.x,player.y);ctx.rotate(player.angle);
+    if(currentSkin==="red"){ctx.fillStyle="red";ctx.fillRect(-20,-20,40,40);ctx.fillStyle="white";ctx.fillRect(-20,-15,40,5);}
+    else if(currentSkin==="blue"){ctx.fillStyle="blue";ctx.fillRect(-20,-20,40,40);ctx.fillStyle="white";ctx.fillRect(-20,-15,40,5);}
+    else{ctx.fillStyle="lime";ctx.fillRect(-20,-20,40,40);}
+    ctx.fillStyle="#111";ctx.fillRect(0,-5,50,10);ctx.restore();
+    enemies.forEach(e=>{ctx.fillStyle="red";ctx.fillRect(e.x-20,e.y-15,40,30);});
+    ctx.fillStyle="yellow";bullets.forEach(b=>{ctx.beginPath();ctx.arc(b.x,b.y,5,0,Math.PI*2);ctx.fill();});
+    ctx.fillStyle="orange";enemyBullets.forEach(b=>{ctx.beginPath();ctx.arc(b.x,b.y,5,0,Math.PI*2);ctx.fill();});
+    ctx.restore();
+}
+
+function endGame(){gameActive=false;overText.innerText="Öldün! Toplam Puan: "+totalScore;gameOver.style.display="block";enemies.forEach(e=>{if(e.shootInterval) clearInterval(e.shootInterval);});}
+function loop(){update();draw();requestAnimationFrame(loop);}
+loop();
+</script>
+</body>
+</html>
